@@ -178,8 +178,8 @@ export function evaluateGrid(
   }
 
   if (levelStatus === "bought") {
-    const target = levelPrice + step * (grid.takeProfitPerGrid / 100) * step;
-    if (price >= levelPrice + step * 0.9) {
+    const target = levelPrice * (1 + grid.takeProfitPerGrid / 100);
+    if (price >= target) {
       return {
         signal: "SELL",
         reason: `Grid SELL level ${nearestLevelIndex + 1}`,

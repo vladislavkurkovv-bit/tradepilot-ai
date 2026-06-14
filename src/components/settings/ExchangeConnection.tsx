@@ -51,7 +51,7 @@ export function ExchangeConnection() {
       const data = await res.json();
       setConnectionStatus(ex, data.success);
       addLog(data.success ? "success" : "error", `${ex}: ${data.message}`);
-    } catch (err) {
+    } catch {
       setConnectionStatus(ex, false);
       addLog("error", `${ex} test failed`);
     } finally {

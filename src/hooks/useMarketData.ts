@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Exchange, MarketData } from "@/lib/types";
 import { useTradingStore } from "@/store/trading-store";
-import { useSettingsStore } from "@/store/settings-store";
 import { useStrategyStore } from "@/store/strategy-store";
 import { mapTimeframeToApi } from "@/lib/strategies";
 import { getPreliminarySignal } from "@/lib/strategy";
@@ -57,7 +56,13 @@ export function useMarketData(exchange: Exchange, symbol: string) {
   }, [exchange, symbol, strategyTimeframe, setMarketData]);
 
   useEffect(() => {
-    fetchMarketData();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void fetchMarketData();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [fetchMarketData]);
 
   return { loading, error, refetch: fetchMarketData };

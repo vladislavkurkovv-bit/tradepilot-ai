@@ -1,9 +1,7 @@
 import type {
-  AISignal,
   PaperAccount,
   Position,
   RiskSettings,
-  Signal,
   Trade,
 } from "@/lib/types";
 
@@ -36,8 +34,7 @@ export function openPaperPosition(
   symbol: string,
   price: number,
   amount: number,
-  risk: RiskSettings,
-  signal: AISignal | Signal
+  risk: RiskSettings
 ): Position {
   const quantity = amount / price;
   const stopLoss =

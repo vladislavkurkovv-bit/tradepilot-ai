@@ -59,14 +59,15 @@ export function useBot(refetchMarket?: () => Promise<unknown>) {
     addTrade,
     addLog,
     updatePaperAccount,
-    addPaperPosition,
-    removePaperPosition,
   } = useTradingStore();
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paperRef = useRef(paperAccount);
   const lastOpenAIAtRef = useRef(0);
-  paperRef.current = paperAccount;
+
+  useEffect(() => {
+    paperRef.current = paperAccount;
+  }, [paperAccount]);
 
   const executeLiveTrade = useCallback(
     async (side: "BUY" | "SELL", quantity: number) => {
@@ -211,37 +212,49 @@ export function useBot(refetchMarket?: () => Promise<unknown>) {
         signal = "HOLD";
       }
 
-      const account = paperRef.current;
+      let account = paperRef.current;
+      const activePositions = () =>
+        account.positions.filter((position) => position.mode === tradingMode);
 
-      for (const position of [...account.positions]) {
+      for (const position of activePositions()) {
         const exit = checkPositionExit(position, marketData.price);
         if (exit) {
           const reason = exit === "sl" ? "Stop Loss" : "Take Profit";
           const trade = closePaperPosition(position, marketData.price, reason);
           if (tradingMode === "paper") {
-            const updated = executePaperSell(account, position.id, trade);
-            updatePaperAccount(updated);
-            removePaperPosition(position.id);
+            account = executePaperSell(account, position.id, trade);
+            updatePaperAccount(account);
+          } else {
+            await executeLiveTrade("SELL", position.quantity);
+            account = {
+              ...account,
+              positions: account.positions.filter((p) => p.id !== position.id),
+            };
+            updatePaperAccount({ positions: account.positions });
           }
           addTrade({ ...trade, exchange, mode: tradingMode });
           addLog(exit === "sl" ? "warn" : "success", `${reason}: ${position.symbol}`);
         }
       }
 
-      if (signal === "SELL" && account.positions.length > 0) {
+      if (signal === "SELL" && activePositions().length > 0) {
         setBotPhase("executing", "SELL сигнал — закрываем позиции...");
-        for (const position of [...account.positions]) {
+        for (const position of activePositions()) {
           const trade = closePaperPosition(
             position,
             marketData.price,
             "SELL сигнал"
           );
           if (tradingMode === "paper") {
-            const updated = executePaperSell(account, position.id, trade);
-            updatePaperAccount(updated);
-            removePaperPosition(position.id);
+            account = executePaperSell(account, position.id, trade);
+            updatePaperAccount(account);
           } else {
             await executeLiveTrade("SELL", position.quantity);
+            account = {
+              ...account,
+              positions: account.positions.filter((p) => p.id !== position.id),
+            };
+            updatePaperAccount({ positions: account.positions });
           }
           addTrade({ ...trade, exchange, mode: tradingMode });
           addLog("info", `Закрыто по SELL: ${position.symbol}`);
@@ -269,7 +282,10 @@ export function useBot(refetchMarket?: () => Promise<unknown>) {
           return;
         }
 
-        if (checkDailyLossLimit(account, risk.maxDailyLossPercent)) {
+        if (
+          tradingMode === "paper" &&
+          checkDailyLossLimit(account, risk.maxDailyLossPercent)
+        ) {
           setBotPhase(
             "waiting_signal",
             "Дневной лимит убытка достигнут. Новые покупки приостановлены."
@@ -278,7 +294,7 @@ export function useBot(refetchMarket?: () => Promise<unknown>) {
           return;
         }
 
-        if (account.positions.length >= risk.maxOpenPositions) {
+        if (activePositions().length >= risk.maxOpenPositions) {
           setBotPhase(
             "waiting_signal",
             `Достигнут лимит открытых позиций (${risk.maxOpenPositions}).`
@@ -287,9 +303,19 @@ export function useBot(refetchMarket?: () => Promise<unknown>) {
           return;
         }
 
-        const balance =
-          tradingMode === "paper" ? account.balance : 10000;
-        const amount = calculatePositionSize(balance, risk);
+        if (tradingMode === "live" && risk.positionSizeMode === "percent") {
+          setBotPhase(
+            "waiting_signal",
+            "Live процент от баланса отключён: сначала нужно подтянуть реальный баланс биржи."
+          );
+          addLog("warn", "Live percent position sizing blocked");
+          return;
+        }
+
+        const amount =
+          tradingMode === "paper"
+            ? calculatePositionSize(account.balance, risk)
+            : risk.fixedAmount;
 
         if (amount < 10) {
           setBotPhase("waiting_signal", "Недостаточно баланса для сделки.");
@@ -297,20 +323,22 @@ export function useBot(refetchMarket?: () => Promise<unknown>) {
           return;
         }
 
-        const position = openPaperPosition(
-          symbol,
-          marketData.price,
-          amount,
-          risk,
-          signal
-        );
+        const position = {
+          ...openPaperPosition(symbol, marketData.price, amount, risk),
+          mode: tradingMode,
+          strategy: activeStrategy,
+        };
 
         if (tradingMode === "paper") {
-          const updated = executePaperBuy(account, position, amount);
-          updatePaperAccount(updated);
-          addPaperPosition(position);
+          account = executePaperBuy(account, position, amount);
+          updatePaperAccount(account);
         } else {
           await executeLiveTrade("BUY", amount / marketData.price);
+          account = {
+            ...account,
+            positions: [...account.positions, position],
+          };
+          updatePaperAccount({ positions: account.positions });
         }
 
         addTrade({
@@ -378,10 +406,10 @@ export function useBot(refetchMarket?: () => Promise<unknown>) {
     addTrade,
     addLog,
     updatePaperAccount,
-    addPaperPosition,
-    removePaperPosition,
     setLastStrategyResult,
     setGridLevels,
+    setAiConfirmation,
+    setLastTradeAt,
     executeLiveTrade,
   ]);
 
